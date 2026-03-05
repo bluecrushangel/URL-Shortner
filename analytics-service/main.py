@@ -2,19 +2,26 @@ import asyncio
 import os
 import asyncpg
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from subscriber import listen_for_clicks
 
 load_dotenv()
 
-# start the subscriber in the background when the app starts
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(listen_for_clicks())
     yield
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 async def health():
@@ -23,14 +30,10 @@ async def health():
 @app.get("/stats/{code}")
 async def get_stats(code: str):
     db = await asyncpg.connect(os.getenv("DATABASE_URL"))
-
     try:
-        # total clicks
         total = await db.fetchval(
             "SELECT COUNT(*) FROM clicks WHERE code = $1", code
         )
-
-        # clicks by country
         countries = await db.fetch(
             """
             SELECT country, COUNT(*) as count 
@@ -38,8 +41,6 @@ async def get_stats(code: str):
             GROUP BY country ORDER BY count DESC
             """, code
         )
-
-        # clicks by device
         devices = await db.fetch(
             """
             SELECT device, COUNT(*) as count 
@@ -47,8 +48,6 @@ async def get_stats(code: str):
             GROUP BY device ORDER BY count DESC
             """, code
         )
-
-        # clicks over time (by day)
         timeline = await db.fetch(
             """
             SELECT DATE(timestamp) as day, COUNT(*) as count
@@ -56,7 +55,6 @@ async def get_stats(code: str):
             GROUP BY day ORDER BY day ASC
             """, code
         )
-
         return {
             "code": code,
             "total_clicks": total,
